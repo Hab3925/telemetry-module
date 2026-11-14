@@ -1,0 +1,35 @@
+{
+    "version": 3,
+    "configurePresets": [
+        {
+            "name": "Master",
+            "displayName": "Master (ground station)",
+            "description": "Firmware for the board that owns the hop clock. Output: build/Master/telemetry.elf",
+            "inherits": "Debug",
+            "cacheVariables": {
+                "TELEMETRY_ROLE": "MASTER"
+            }
+        },
+        {
+            "name": "Slave",
+            "displayName": "Slave (rocket)",
+            "description": "Firmware for the board that follows the master. Output: build/Slave/telemetry.elf",
+            "inherits": "Debug",
+            "cacheVariables": {
+                "TELEMETRY_ROLE": "SLAVE"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "Master",
+            "displayName": "Master (ground station)",
+            "configurePreset": "Master"
+        },
+        {
+            "name": "Slave",
+            "displayName": "Slave (rocket)",
+            "configurePreset": "Slave"
+        }
+    ]
+}

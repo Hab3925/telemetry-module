@@ -1,0 +1,8 @@
+build/
+mx.scratch
+!.settings
+logs/
+.vscode/
+.settings/
+*.csv
+

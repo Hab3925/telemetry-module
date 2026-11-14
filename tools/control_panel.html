@@ -1,0 +1,825 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Telemetry Control Panel</title>
+<style>
+/* Layout: one column per board, live readouts on top, controls below, command log at the bottom. */
+:root {
+  --bg: #f4f5f4;
+  --panel: #ffffff;
+  --ink: #131614;
+  --ink-2: #4b524e;
+  --ink-3: #7b827e;
+  --rule: #dde1de;
+  --field: #f7f8f7;
+  --accent: #1f6fd1;
+  --accent-ink: #ffffff;
+  --good: #1d8a4e;
+  --warn: #b26a00;
+  --bad: #c43c3c;
+  --spark: #1f6fd1;
+  --spark-2: #c4561f;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
+  --mono: ui-monospace, "SFMono-Regular", "DejaVu Sans Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121413; --panel: #1a1d1b; --ink: #edf0ee; --ink-2: #bfc6c1; --ink-3: #8a918c;
+    --rule: #2c312e; --field: #212522; --accent: #4c8fe6; --accent-ink: #0d1117;
+    --good: #3fb871; --warn: #e2a33a; --bad: #e46a6a; --spark: #4c8fe6; --spark-2: #e07a45;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 var(--font); }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 24px 16px 40px; display: grid; gap: 20px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 20px; }
+h1 { margin: 0; font-size: 22px; font-weight: 600; }
+.sub { color: var(--ink-3); font-size: 13px; }
+.boards { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 20px; align-items: start; }
+.card { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 18px; display: grid; gap: 16px; min-width: 0; }
+.card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.card-head h2 { margin: 0; font-size: 17px; font-weight: 600; }
+.ip { font-family: var(--mono); font-size: 12px; color: var(--ink-3); }
+.pill { margin-left: auto; font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; border: 1px solid currentColor; display: inline-flex; align-items: center; gap: 6px; }
+.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.pill.good { color: var(--good); } .pill.warn { color: var(--warn); } .pill.bad { color: var(--bad); } .pill.idle { color: var(--ink-3); }
+.readouts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.ro { display: grid; gap: 2px; min-width: 0; }
+.ro .k { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-3); }
+.ro .v { font-family: var(--mono); font-size: 18px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ro .v small { font-size: 12px; color: var(--ink-3); margin-left: 2px; }
+.counters { display: flex; flex-wrap: wrap; gap: 4px 16px; font-family: var(--mono); font-size: 12px; color: var(--ink-2); }
+.counters b { font-weight: 500; color: var(--ink); }
+.spark { display: grid; gap: 4px; }
+.spark-legend { display: flex; gap: 14px; font-size: 11px; color: var(--ink-3); }
+.spark-legend i { display: inline-block; width: 12px; height: 2px; vertical-align: middle; margin-right: 5px; }
+svg.sp { width: 100%; height: 64px; display: block; }
+.section { display: grid; gap: 10px; border-top: 1px solid var(--rule); padding-top: 14px; }
+.section h3 { margin: 0; font-size: 13px; font-weight: 600; }
+.hint { margin: 0; font-size: 12px; color: var(--ink-3); }
+.hint.warn { color: var(--warn); }
+.ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+input[type=range] { flex: 1 1 160px; accent-color: var(--accent); }
+input[type=number] { width: 92px; font: 14px var(--mono); padding: 6px 8px; border: 1px solid var(--rule); border-radius: 6px; background: var(--field); color: var(--ink); }
+label.inline { display: grid; gap: 3px; font-size: 11px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .05em; }
+button { font: 600 13px var(--font); padding: 7px 14px; border-radius: 6px; border: 1px solid var(--rule); background: var(--field); color: var(--ink); cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+button.danger { border-color: var(--bad); color: var(--bad); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; background: transparent; font-weight: 500; }
+.seg button[aria-pressed=true] { background: var(--accent); color: var(--accent-ink); }
+.check { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.cw-active { font-family: var(--mono); font-size: 13px; color: var(--warn); }
+.log { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 12px 16px; }
+.log h2 { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
+.log ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-family: var(--mono); font-size: 12px; max-height: 160px; overflow: auto; }
+.log li { color: var(--ink-2); }
+.log li.err { color: var(--bad); }
+.log time { color: var(--ink-3); margin-right: 8px; }
+.offline .readouts, .offline .counters, .offline .spark { opacity: .35; }
+.modem { display: grid; gap: 16px; }
+.modem-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 20px; align-items: start; }
+@media (max-width: 900px) { .modem-grid { grid-template-columns: minmax(0, 1fr); } }
+.form { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; }
+select { font: 14px var(--mono); padding: 6px 8px; border: 1px solid var(--rule); border-radius: 6px; background: var(--field); color: var(--ink); }
+.form label.inline input, .form label.inline select { width: 100%; }
+.preview { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
+.margin-good { color: var(--good); } .margin-warn { color: var(--warn); } .margin-bad { color: var(--bad); }
+.tablewrap { overflow-x: auto; }
+table.opts { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; }
+table.opts th, table.opts td { padding: 5px 8px; text-align: right; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+table.opts th { font-weight: 500; color: var(--ink-3); }
+table.opts td { font-family: var(--mono); }
+table.opts th:first-child, table.opts td:first-child { text-align: left; }
+table.opts tr.best td { background: color-mix(in srgb, var(--good) 12%, transparent); }
+table.opts tr.unreach td { color: var(--ink-3); }
+table.opts button { padding: 2px 10px; font-size: 12px; }
+.switch-state { font-family: var(--mono); font-size: 13px; }
+.logbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 10px 14px; }
+.logbar .file { font-family: var(--mono); font-size: 12px; color: var(--ink-2); min-width: 0; overflow-wrap: anywhere; }
+.logbar input[type=text] { flex: 1 1 220px; font: 13px var(--font); padding: 6px 8px; border: 1px solid var(--rule); border-radius: 6px; background: var(--field); color: var(--ink); }
+svg.chan { width: 100%; height: auto; display: block; }
+svg.chan text { font-family: var(--mono); font-size: 10px; fill: var(--ink-3); }
+@media (max-width: 520px) { .readouts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Telemetry Control Panel</h1>
+    <span class="sub" id="sub">Polling both boards every second · changes last until the board restarts</span>
+  </header>
+  <div class="logbar" id="logbar">
+    <span class="pill idle" id="log-state">Not logging</span>
+    <span class="file" id="log-file"></span>
+    <button id="log-toggle">Start logging</button>
+    <input type="text" id="log-note" maxlength="300" placeholder="Note for the log, e.g. antennas raised to 3 m">
+    <button id="log-add">Add note</button>
+  </div>
+
+  <div class="boards" id="boards"></div>
+
+  <section class="card modem" id="modem">
+    <div class="card-head">
+      <h2>Radio settings, both boards</h2>
+      <span class="ip" id="modem-now">current: –</span>
+      <span class="pill idle" id="modem-state">–</span>
+    </div>
+    <p class="hint">Applied through the master: it announces the settings over the link, the slave confirms, and both switch at the same hop. If the link does not come up within 5 s both go back to the previous settings; after 30 s without link both return to the firmware defaults. Settings last until the boards restart.</p>
+    <div class="modem-grid">
+      <div class="section" style="border-top:0;padding-top:0">
+        <h3>New settings</h3>
+        <div class="form">
+          <label class="inline">Spreading factor<select id="m-sf"></select></label>
+          <label class="inline">Bandwidth kHz<select id="m-bw"></select></label>
+          <label class="inline">Coding rate<select id="m-cr"></select></label>
+          <label class="inline">Link split<select id="m-split"><option value="rocket">Rocket priority</option><option value="equal">Equal</option><option value="custom">Custom</option></select></label>
+          <label class="inline">Master frame B<input type="number" id="m-mp" min="32" max="255" step="1" value="128"></label>
+          <label class="inline">Slave frame B<input type="number" id="m-sp" min="32" max="255" step="1" value="128"></label>
+        </div>
+        <div class="preview" id="m-preview"></div>
+        <div class="ctl">
+          <button class="primary" id="m-apply">Apply to both boards</button>
+          <button id="m-current">Reset to current</button>
+        </div>
+      </div>
+      <div class="section" style="border-top:0;padding-top:0">
+        <h3>Link budget estimate</h3>
+        <div class="form">
+          <label class="inline">Distance km<input type="number" id="b-dist" min="0.01" step="0.5" value="10"></label>
+          <label class="inline">Extra loss dB<input type="number" id="b-extra" min="0" step="1" value="0"></label>
+          <label class="inline">Needed margin dB<input type="number" id="b-need" min="0" step="1" value="10"></label>
+          <label class="inline">RSSI at 1 m dBm<input type="number" id="b-ref" step="1" value="-9"></label>
+          <label class="inline">Noise floor dBm<input type="number" id="b-noise" step="1" value="-100"></label>
+        </div>
+        <p class="hint">Reference: RSSI at 1 m with −4 dBm TX and the Moxon faces aligned (measured −9 dBm), corrected for the master's current TX power. Noise floor as the boards measure it at 812 kHz. Extra loss covers ground reflection, Fresnel obstruction, pointing and polarization. Estimates only, typically ±5 dB.</p>
+        <div class="tablewrap">
+          <table class="opts">
+            <thead><tr><th>Setting</th><th>Frames M/S B</th><th>Hop ms</th><th>↓ slave→master kbit/s</th><th>↑ kbit/s</th><th>Margin dB</th><th></th></tr></thead>
+            <tbody id="b-table"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+  <section class="card" id="chan">
+    <div class="card-head">
+      <h2>Channel quality</h2>
+      <span class="ip" id="chan-info">master: replies received per frame sent, per channel</span>
+      <button id="chan-reset" style="margin-left:auto">Reset view</button>
+    </div>
+    <svg class="chan" id="chan-svg" viewBox="0 0 900 220" role="img" aria-label="Reply success per hop channel"></svg>
+    <p class="hint">Each bar is one of the 40 hop channels (2401–2479 MHz). Height = share of the master's frames on that channel that got a reply, so it includes both directions. Red marks = transmissions skipped because LBT found the channel busy. The shaded bands are WiFi channels 1, 6 and 11: if losses cluster there, the cause is WiFi near one of the boards.</p>
+  </section>
+
+  <section class="card" id="tput">
+    <div class="card-head">
+      <h2>Throughput test</h2>
+      <span class="ip">runs through the master; the slave needs no Ethernet</span>
+    </div>
+    <div class="modem-grid" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr))">
+      <div class="section" style="border-top:0;padding-top:0">
+        <h3>Slave → master (telemetry direction)</h3>
+        <p class="hint">The slave fills every frame with numbered dummy data; the master counts it and drops it. Measures the radio link alone.</p>
+        <div class="ctl">
+          <label class="inline">Run for s (0 = until stopped)<input type="number" id="g-dur" min="0" max="3600" step="10" value="60"></label>
+          <button class="primary" id="g-start">Start</button>
+          <button class="danger" id="g-stop">Stop</button>
+          <span class="pill idle" id="g-state">Idle</span>
+        </div>
+        <div class="readouts">
+          <div class="ro"><span class="k">Now</span><span class="v" id="g-now">–</span></div>
+          <div class="ro"><span class="k">Average</span><span class="v" id="g-avg">–</span></div>
+          <div class="ro"><span class="k">Of capacity</span><span class="v" id="g-pct">–</span></div>
+          <div class="ro"><span class="k">Frames lost</span><span class="v" id="g-lost">–</span></div>
+        </div>
+        <svg class="sp" id="g-spark" viewBox="0 0 300 64" preserveAspectRatio="none" aria-hidden="true"></svg>
+      </div>
+      <div class="section" style="border-top:0;padding-top:0">
+        <h3>Round trip (both directions)</h3>
+        <p class="hint">Real UDP datagrams to the master's echo port; the slave sends them back. Every byte crosses the link twice, so this shows what each direction carries at the same time.</p>
+        <div class="ctl">
+          <label class="inline">Datagram B<input type="number" id="e-size" min="16" max="1472" step="16" value="200"></label>
+          <label class="inline">In flight<input type="number" id="e-win" min="1" max="8" step="1" value="3"></label>
+          <label class="inline">Run for s<input type="number" id="e-dur" min="1" max="3600" step="10" value="30"></label>
+          <button class="primary" id="e-start">Start</button>
+          <button class="danger" id="e-stop">Stop</button>
+          <span class="pill idle" id="e-state">Idle</span>
+        </div>
+        <div class="readouts">
+          <div class="ro"><span class="k">Now</span><span class="v" id="e-now">–</span></div>
+          <div class="ro"><span class="k">Average</span><span class="v" id="e-avg">–</span></div>
+          <div class="ro"><span class="k">Back / sent</span><span class="v" id="e-cnt">–</span></div>
+          <div class="ro"><span class="k">Round trip</span><span class="v" id="e-rtt">–</span></div>
+        </div>
+        <svg class="sp" id="e-spark" viewBox="0 0 300 64" preserveAspectRatio="none" aria-hidden="true"></svg>
+        <p class="hint" id="e-note"></p>
+      </div>
+    </div>
+  </section>
+
+  <section class="log">
+    <h2>Command log</h2>
+    <ol id="log"></ol>
+  </section>
+</div>
+
+<template id="card-tpl">
+  <article class="card">
+    <div class="card-head">
+      <h2 data-f="title">Board</h2><span class="ip" data-f="ip"></span>
+      <span class="pill idle" data-f="state">Connecting</span>
+    </div>
+    <div class="readouts">
+      <div class="ro"><span class="k">RSSI</span><span class="v" data-f="rssi">–</span></div>
+      <div class="ro"><span class="k">SNR</span><span class="v" data-f="snr">–</span></div>
+      <div class="ro"><span class="k">Link quality 5 s</span><span class="v" data-f="lq">–</span></div>
+      <div class="ro"><span class="k">Board temp</span><span class="v" data-f="temp">–</span></div>
+    </div>
+    <div class="counters" data-f="counters"></div>
+    <div class="spark">
+      <div class="spark-legend"><span><i style="background:var(--spark)"></i>RSSI, last 2 min</span><span><i style="background:var(--spark-2)"></i>Temperature</span></div>
+      <svg class="sp" data-f="spark" viewBox="0 0 300 64" preserveAspectRatio="none" aria-hidden="true"></svg>
+    </div>
+
+    <div class="section">
+      <h3>TX power <span class="ip" data-f="pwr-now"></span></h3>
+      <div class="ctl">
+        <input type="range" data-f="pwr-range" min="-18" max="-4" step="1" value="-4" aria-label="TX power">
+        <input type="number" data-f="pwr-num" min="-18" max="-4" step="1" value="-4" aria-label="TX power in dBm">
+        <button class="primary" data-f="pwr-apply">Apply</button>
+      </div>
+      <p class="hint" data-f="pwr-hint">SX1280 output in dBm. The firmware limits it for the TX antenna's gain so the EIRP stays within 20 dBm.</p>
+    </div>
+
+    <div class="section">
+      <h3>Antennas</h3>
+      <div class="ctl">
+        <label class="inline">Transmit on<select data-f="ant-tx"></select></label>
+        <label class="inline">Receive on<select data-f="ant-rx"></select></label>
+        <button class="primary" data-f="ant-apply">Apply</button>
+      </div>
+      <p class="hint" data-f="ant-hint">Ports and gains come from the antenna table in the firmware config.</p>
+    </div>
+
+    <div class="section">
+      <h3>RX LNA mode</h3>
+      <div class="ctl">
+        <div class="seg" role="group" aria-label="RX LNA mode">
+          <button data-f="lna-normal" aria-pressed="false">Normal</button>
+          <button data-f="lna-high" aria-pressed="false">High sensitivity</button>
+        </div>
+      </div>
+      <p class="hint warn" data-f="lna-hint" hidden>High sensitivity makes RSSI and the LBT check read about 55 dB too low. Use it for diagnostics only.</p>
+    </div>
+
+    <div class="section">
+      <h3>Carrier test</h3>
+      <div class="ctl">
+        <label class="inline">MHz<input type="number" data-f="cw-freq" min="2401" max="2482" step="0.5" value="2440"></label>
+        <label class="inline">dBm<input type="number" data-f="cw-dbm" min="-18" max="5" step="1" value="-18"></label>
+        <label class="inline">Stop after s<input type="number" data-f="cw-timeout" min="1" max="600" step="1" value="60"></label>
+      </div>
+      <label class="check"><input type="checkbox" data-f="cw-ack"> Attenuator or 50 Ω load on J3</label>
+      <div class="ctl">
+        <button class="primary" data-f="cw-start" disabled>Start carrier</button>
+        <button class="danger" data-f="cw-stop">Stop</button>
+        <span class="cw-active" data-f="cw-state"></span>
+      </div>
+      <p class="hint">Stops the radio link and transmits an unmodulated carrier without LBT. The board stops by itself after the timeout.</p>
+    </div>
+  </article>
+</template>
+
+<script>
+const HISTORY_S = 120;
+const boards = {};
+const $ = (root, f) => root.querySelector(`[data-f="${f}"]`);
+
+function log(text, error) {
+  const li = document.createElement("li");
+  if (error) li.className = "err";
+  const t = document.createElement("time");
+  t.textContent = new Date().toLocaleTimeString();
+  li.append(t, text);
+  const ol = document.getElementById("log");
+  ol.prepend(li);
+  while (ol.children.length > 100) ol.lastChild.remove();
+}
+
+async function command(board, cmd) {
+  try {
+    const r = await fetch("/api/command", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ host: board.host, cmd }) });
+    const j = await r.json();
+    log(`${board.name}: ${cmd} → ${j.reply ?? j.error}`, !j.ok);
+    poll(board);
+    return j.ok;
+  } catch (e) {
+    log(`${board.name}: ${cmd} → control panel server not reachable`, true);
+    return false;
+  }
+}
+
+function setState(board, cls, text) {
+  const p = $(board.el, "state");
+  p.className = "pill " + cls;
+  p.textContent = text;
+}
+
+function spark(board) {
+  const svg = $(board.el, "spark");
+  const now = Date.now() / 1000, h = board.history.filter(p => now - p.t <= HISTORY_S);
+  board.history = h;
+  const path = (key, lo, hi) => {
+    const pts = h.filter(p => p[key] !== null && p[key] !== undefined);
+    if (pts.length < 2) return "";
+    return pts.map((p, i) => {
+      const x = 300 * (1 - (now - p.t) / HISTORY_S);
+      const y = 60 - 56 * (Math.min(hi, Math.max(lo, p[key])) - lo) / (hi - lo || 1);
+      return (i ? "L" : "M") + x.toFixed(1) + " " + y.toFixed(1);
+    }).join(" ");
+  };
+  const rs = h.map(p => p.rssi).filter(v => v != null), ts = h.map(p => p.temp).filter(v => v != null);
+  const rlo = Math.min(...rs, -100) , rhi = Math.max(...rs, -10);
+  const tlo = Math.min(...ts) - 1, thi = Math.max(...ts) + 1;
+  svg.innerHTML =
+    `<path d="${path("rssi", rs.length ? Math.min(...rs) - 3 : rlo, rs.length ? Math.max(...rs) + 3 : rhi)}" fill="none" stroke="var(--spark)" stroke-width="2" vector-effect="non-scaling-stroke"/>` +
+    `<path d="${ts.length ? path("temp", tlo, thi) : ""}" fill="none" stroke="var(--spark-2)" stroke-width="1.5" vector-effect="non-scaling-stroke" opacity=".85"/>`;
+}
+
+function render(board, st, t) {
+  const prev = board.prev, el = board.el;
+  board.el.classList.remove("offline");
+  $(el, "title").textContent = st.role === "master" ? "Master" : st.role === "slave" ? "Slave" : "Board";
+  board.name = $(el, "title").textContent;
+
+  // interval averages from the firmware's running sums
+  let rssi = st.rssi, snr = st.snr, lq = null, d = {};
+  if (prev && st["frames.rx"] >= prev.st["frames.rx"]) {
+    const frames = st["frames.rx"] - prev.st["frames.rx"], dt = t - prev.t;
+    if (frames > 0 && "rssi_sum" in st) { rssi = (st.rssi_sum - prev.st.rssi_sum) / frames; snr = (st.snr_sum - prev.st.snr_sum) / frames; }
+    // Link quality over the last 5 s: per second only 9 or 10 whole frames fit at a 104 ms hop,
+    // which would show as 94 % without any loss.
+    if (st.frame_us && dt > 0) {
+      board.lqWin = (board.lqWin || []).concat([{ frames, expected: dt * 1e6 / st.frame_us }]).slice(-5);
+      const f = board.lqWin.reduce((a, w) => a + w.frames, 0), e = board.lqWin.reduce((a, w) => a + w.expected, 0);
+      lq = Math.min(100, 100 * f / e);
+    }
+    for (const k of ["frames.lost", "frames.crc_err", "frames.lbt_busy", "frames.lbt_invalid", "frames.sync_lost"]) d[k] = st[k] - prev.st[k];
+  }
+  board.prev = { st, t };
+  board.st = st;
+  const temp = typeof st["board.temp_c"] === "number" ? st["board.temp_c"] : null;
+  const cw = st.test_cw === 1;
+
+  if (!st.radio_ok) setState(board, "bad", "Radio fault");
+  else if (cw) setState(board, "warn", "Carrier test");
+  else if (st.connected) setState(board, "good", "Linked");
+  else setState(board, "warn", "No link");
+
+  const linked = st.connected && !cw;
+  $(el, "rssi").innerHTML = linked && rssi != null ? `${rssi.toFixed(0)}<small>dBm</small>` : "–";
+  $(el, "snr").innerHTML = linked && snr != null ? `${snr.toFixed(0)}<small>dB</small>` : "–";
+  $(el, "lq").innerHTML = lq != null && !cw ? `${lq.toFixed(0)}<small>%</small>` : "–";
+  $(el, "temp").innerHTML = temp != null ? `${temp.toFixed(1)}<small>°C</small>` : "–";
+  const c = (label, v) => `<span>${label} <b>${v ?? "–"}</b></span>`;
+  $(el, "counters").innerHTML =
+    c("lost/s", d["frames.lost"]) + c("crc/s", d["frames.crc_err"]) + c("lbt busy/s", d["frames.lbt_busy"]) +
+    c("lbt invalid/s", d["frames.lbt_invalid"]) + c("cca", st.cca_rssi + " dBm") + c("hop", st.hop) + c("sync lost", st["frames.sync_lost"]) +
+    ("modem.sf" in st ? c("modem", `SF${st["modem.sf"]} ${st["modem.bw"]} kHz CR4/${st["modem.cr"]} ${st["modem.mp"]}/${st["modem.sp"]} B`) : "");
+  updateModem();
+  if (board.st.role === "master") updateGen();
+
+  board.history.push({ t, rssi: linked ? rssi : null, temp });
+  spark(board);
+
+  // power control: range from firmware, keep the user's unsent edit
+  const max = st.tx_max_dbm ?? -4;
+  for (const f of ["pwr-range", "pwr-num"]) $(el, f).max = max;
+  const ports = parsePorts(st["antenna.ports"]);
+  const txAnt = ports.find(p => p.port === st["antenna.tx"]), rxAnt = ports.find(p => p.port === st["antenna.rx"]);
+  $(el, "pwr-now").textContent = `now ${st.tx_dbm} dBm` + (st.tx_req_dbm !== undefined && st.tx_req_dbm !== st.tx_dbm ? ` (requested ${st.tx_req_dbm})` : "") +
+    ` · max ${max} dBm` + (txAnt ? ` on ${txAnt.name}` : "");
+  if (!ports.length) {
+    $(el, "ant-tx").innerHTML = $(el, "ant-rx").innerHTML = "";
+    $(el, "ant-apply").disabled = true;
+    $(el, "ant-hint").textContent = "This board's firmware has no antenna support: flash the current build.";
+    board.antPorts = "";
+  } else {
+    $(el, "ant-apply").disabled = false;
+    // Rebuild the options only when the antenna table changes: replacing them closes an open dropdown.
+    if (board.antPorts !== st["antenna.ports"]) {
+      board.antPorts = st["antenna.ports"];
+      const opts = (txOnly) => ports.filter(p => p.gain > -1000).map(p =>
+        `<option value="${p.port}" ${txOnly && !p.txOk ? "disabled" : ""}>J${p.port + 2} ${p.name} (${(p.gain / 10).toFixed(1)} dBi)${txOnly && !p.txOk ? " – too much gain" : ""}</option>`).join("");
+      $(el, "ant-tx").innerHTML = opts(true); $(el, "ant-rx").innerHTML = opts(false);
+      board.antDirty = false;
+    }
+    // Show the board's current choice unless the user is editing it.
+    const editing = board.antDirty || [ $(el, "ant-tx"), $(el, "ant-rx") ].includes(document.activeElement);
+    if (!editing) { $(el, "ant-tx").value = st["antenna.tx"]; $(el, "ant-rx").value = st["antenna.rx"]; }
+    if (txAnt) {
+      const eirp = st.tx_dbm + 17 + txAnt.gain / 10;
+      $(el, "ant-hint").textContent = `Transmitting on ${txAnt.name}: max ${txAnt.max} dBm SX1280 setting, now about ${eirp.toFixed(1)} dBm EIRP. ` +
+        `Receiving on ${rxAnt ? rxAnt.name : "?"}. LBT is measured on the transmit antenna.` +
+        (ports.some(p => p.gain > -1000 && !p.txOk) ? ` ${ports.filter(p => p.gain > -1000 && !p.txOk).map(p => p.name).join(", ")}: receive only, the gain is too high to transmit within 20 dBm EIRP.` : "");
+    }
+  }
+  if (!board.pwrDirty) { $(el, "pwr-range").value = st.tx_dbm; $(el, "pwr-num").value = st.tx_dbm; }
+
+  const high = st.rx_high_sens === 1;
+  $(el, "lna-normal").setAttribute("aria-pressed", String(!high));
+  $(el, "lna-high").setAttribute("aria-pressed", String(high));
+  $(el, "lna-hint").hidden = !high;
+
+  $(el, "cw-state").textContent = cw ? `ON ${(st.cw_khz / 1000).toFixed(3)} MHz, ${st.cw_dbm} dBm` : "";
+}
+
+async function poll(board) {
+  const t = Date.now() / 1000;
+  try {
+    const r = await fetch(`/api/status?host=${encodeURIComponent(board.host)}`);
+    const j = await r.json();
+    if (!j.online) {
+      board.el.classList.add("offline"); setState(board, "bad", "Offline"); board.prev = null;
+      board.history.push({ t, rssi: null, temp: null }); spark(board);
+      return;
+    }
+    render(board, j.status, t);
+  } catch (e) {
+    setState(board, "bad", "Panel server stopped");
+  }
+}
+
+function parsePorts(text) {
+  if (typeof text !== "string") return [];
+  return text.split(";").map(e => { const [port, name, gain, max, ok] = e.split(":");
+    return { port: +port, name, gain: +gain, max: +max, txOk: ok === "1" }; });
+}
+
+function wire(board) {
+  const el = board.el;
+  for (const f of ["ant-tx", "ant-rx"]) $(el, f).addEventListener("change", () => { board.antDirty = true; });
+  $(el, "ant-apply").addEventListener("click", async () => {
+    await command(board, `antenna ${$(el, "ant-tx").value} ${$(el, "ant-rx").value}`);
+    board.antDirty = false;
+  });
+  const range = $(el, "pwr-range"), num = $(el, "pwr-num");
+  range.addEventListener("input", () => { num.value = range.value; board.pwrDirty = true; });
+  num.addEventListener("input", () => { range.value = num.value; board.pwrDirty = true; });
+  $(el, "pwr-apply").addEventListener("click", async () => {
+    await command(board, `power ${parseInt(num.value, 10)}`);
+    board.pwrDirty = false;
+  });
+  $(el, "lna-normal").addEventListener("click", () => command(board, "rxgain normal"));
+  $(el, "lna-high").addEventListener("click", () => command(board, "rxgain high"));
+  const ack = $(el, "cw-ack"), start = $(el, "cw-start");
+  ack.addEventListener("change", () => { start.disabled = !ack.checked; });
+  start.addEventListener("click", () => {
+    const f = parseFloat($(el, "cw-freq").value), p = parseInt($(el, "cw-dbm").value, 10), s = parseInt($(el, "cw-timeout").value, 10);
+    command(board, `cw ${f.toFixed(3)} ${p} ${s}`);
+  });
+  $(el, "cw-stop").addEventListener("click", () => command(board, "stop"));
+}
+
+// ---- Radio settings: timing model (same formulas as the firmware) and link budget estimate ----
+const BW_HZ = { 200: 203125, 400: 406250, 800: 812500, 1600: 1625000 };
+const SNR_MIN = { 5: -2.5, 6: -5, 7: -7.5, 8: -10, 9: -12.5, 10: -15, 11: -17.5, 12: -20 };
+const PREAMBLE = 12, MAX_COT_US = 60000, OVERHEAD_B = 9; // link header + one segment header
+
+function toaUs(sf, bwk, crDen, pl) {
+  const cr = crDen - 4;
+  let q = PREAMBLE * 4 + (sf <= 6 ? 25 : 17) + 32;
+  const num = Math.max(0, sf <= 6 ? 8 * pl + 16 - 4 * sf + 20 : 8 * pl + 16 - 4 * sf + 8 + 20);
+  const den = sf >= 11 ? 4 * (sf - 2) : 4 * sf;
+  q += Math.ceil(num / den) * (cr + 4) * 4;
+  return Math.floor(q * 2 ** sf * 1e6 / (4 * BW_HZ[bwk]));
+}
+function timing(sf, bwk, crDen, mp, sp) {
+  if (mp < 32 || sp < 32 || mp > 255 || sp > 255) return null;
+  const tm = toaUs(sf, bwk, crDen, mp), ts = toaUs(sf, bwk, crDen, sp);
+  if (tm >= MAX_COT_US || ts >= MAX_COT_US) return null;
+  const rv = 60 + Math.floor(2 ** sf * 1e6 / BW_HZ[bwk]) + 30, cca = rv + 150, prep = cca + 200;
+  const frame = Math.ceil(((200 + cca + 100) + tm + (300 + prep) + ts + 1000 + 500) / 100) * 100;
+  return { frame, tm, ts, capM: (mp - OVERHEAD_B) * 8e6 / frame, capS: (sp - OVERHEAD_B) * 8e6 / frame };
+}
+function num(id) { return parseFloat(document.getElementById(id).value); }
+// Margin in the weaker direction. The 1 m reference was measured Moxon to Moxon at -4 dBm, so each
+// direction is corrected for the actual TX power and the TX/RX antenna gains (relative to 4.2 dBi).
+const REF_GAIN = 4.2;
+function antGains(st) {
+  const ports = parsePorts(st && st["antenna.ports"]), g = p => { const a = ports.find(x => x.port === p); return a ? a.gain / 10 : REF_GAIN; };
+  return st ? { tx: g(st["antenna.tx"]), rx: g(st["antenna.rx"]), dbm: st.tx_dbm ?? -4 } : { tx: REF_GAIN, rx: REF_GAIN, dbm: -4 };
+}
+function margins(sf, bwk) {
+  const sts = Object.values(boards).map(b => b.st).filter(Boolean);
+  const M = antGains(sts.find(s => s.role === "master")), S = antGains(sts.find(s => s.role === "slave") || sts.find(s => s.role === "master"));
+  const path = num("b-ref") + 4 - 20 * Math.log10(num("b-dist") * 1000) - num("b-extra");
+  const sens = num("b-noise") + 10 * Math.log10(BW_HZ[bwk] / 812500) + SNR_MIN[sf];
+  const down = path + S.dbm + (S.tx - REF_GAIN) + (M.rx - REF_GAIN) - sens; // slave -> master
+  const up = path + M.dbm + (M.tx - REF_GAIN) + (S.rx - REF_GAIN) - sens;   // master -> slave
+  return { down, up, min: Math.min(down, up) };
+}
+function margin(sf, bwk) { return margins(sf, bwk).min; }
+const marginClass = m => m >= num("b-need") ? "margin-good" : m >= 0 ? "margin-warn" : "margin-bad";
+const masterBoard = () => Object.values(boards).find(b => b.st && b.st.role === "master");
+let modemFormInit = false;
+
+function formCfg() {
+  return { sf: +document.getElementById("m-sf").value, bw: +document.getElementById("m-bw").value,
+           cr: +document.getElementById("m-cr").value, mp: Math.round(num("m-mp")), sp: Math.round(num("m-sp")) };
+}
+function setForm(c) {
+  if (!c.split) {
+    const r = splitFrames(c.sf, c.bw, c.cr, "rocket");
+    c.split = (r && c.mp === 32 && c.sp === r.sp) ? "rocket" : (c.mp === c.sp ? "equal" : "custom");
+  }
+  document.getElementById("m-split").value = c.split;
+  document.getElementById("m-sf").value = c.sf; document.getElementById("m-bw").value = c.bw;
+  document.getElementById("m-cr").value = c.cr; document.getElementById("m-mp").value = c.mp;
+  document.getElementById("m-sp").value = c.sp; renderModemCalc();
+}
+function currentCfg(st) {
+  return { sf: st["modem.sf"], bw: st["modem.bw"], cr: st["modem.cr"], mp: st["modem.mp"], sp: st["modem.sp"] };
+}
+
+// Frame sizes for a link split: rocket priority = smallest master frame (commands), largest allowed slave frame.
+function splitFrames(sf, bw, cr, split) {
+  for (let p = 255; p >= 32; p--) {
+    const mp = split === "equal" ? p : 32, t = timing(sf, bw, cr, mp, p);
+    if (t) return { mp, sp: p, t };
+  }
+  return null;
+}
+
+function renderModemCalc() {
+  const c = formCfg(), t = timing(c.sf, c.bw, c.cr, c.mp, c.sp), pv = document.getElementById("m-preview");
+  const ro = (k, v) => `<div class="ro"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+  if (!t) {
+    pv.innerHTML = `<p class="hint warn">Not allowed: frames must be 32–255 bytes and each under 60 ms on air.</p>`;
+    document.getElementById("m-apply").disabled = true;
+  } else {
+    const m = margin(c.sf, c.bw);
+    pv.innerHTML = ro("Hop", `${(t.frame / 1000).toFixed(1)}<small>ms</small>`) +
+      ro("On air M/S", `${(t.tm / 1000).toFixed(1)}/${(t.ts / 1000).toFixed(1)}<small>ms</small>`) +
+      ro("Master → slave", `${(t.capM / 1000).toFixed(1)}<small>kbit/s</small>`) +
+      ro("Slave → master", `${(t.capS / 1000).toFixed(1)}<small>kbit/s</small>`) +
+      ro(`Margin @ ${num("b-dist")} km ↓/↑`, (() => { const mm = margins(c.sf, c.bw);
+        return `<span class="${marginClass(mm.down)}">${mm.down.toFixed(0)}</span>/<span class="${marginClass(mm.up)}">${mm.up.toFixed(0)}</span><small>dB</small>`; })());
+    document.getElementById("m-apply").disabled = !masterBoard();
+  }
+  // all combinations at the chosen coding rate; frames per the link split
+  const split = document.getElementById("m-split").value === "equal" ? "equal" : "rocket";
+  const rows = [];
+  for (let sf = 5; sf <= 12; sf++) for (const bw of [200, 400, 800, 1600]) {
+    const r = splitFrames(sf, bw, c.cr, split);
+    if (r) rows.push({ sf, bw, mp: r.mp, sp: r.sp, t: r.t, m: margin(sf, bw) });
+  }
+  rows.sort((a, b) => b.t.capS - a.t.capS);
+  const need = num("b-need"), top = rows.find(r => r.m >= need);
+  document.getElementById("b-table").innerHTML = rows.map(r =>
+    `<tr class="${r === top ? "best" : r.m < need ? "unreach" : ""}"><td>SF${r.sf} · ${r.bw} kHz · 4/${c.cr}</td><td>${r.mp}/${r.sp}</td>` +
+    `<td>${(r.t.frame / 1000).toFixed(1)}</td><td>${(r.t.capS / 1000).toFixed(1)}</td><td>${(r.t.capM / 1000).toFixed(1)}</td>` +
+    `<td class="${marginClass(r.m)}">${r.m.toFixed(0)}</td>` +
+    `<td><button data-use='${JSON.stringify({ sf: r.sf, bw: r.bw, cr: c.cr, mp: r.mp, sp: r.sp, split })}'>Use</button></td></tr>`).join("");
+}
+
+function updateModem() {
+  const m = masterBoard(), st = m && m.st;
+  if (!st || !("modem.sf" in st)) return;
+  const cur = currentCfg(st);
+  document.getElementById("modem-now").textContent =
+    `current: SF${cur.sf} · ${cur.bw} kHz · CR 4/${cur.cr} · frames ${cur.mp}/${cur.sp} B · hop ${(st.frame_us / 1000).toFixed(1)} ms`;
+  const pill = document.getElementById("modem-state"), sw = st["modem.switch"], res = st["modem.result"];
+  const states = {
+    announce: ["warn", "Announcing to slave"], probation: ["warn", "Testing new settings"],
+    ok: ["good", "Switched"], no_ack: ["bad", "Slave did not confirm"], reverted: ["bad", "No link, reverted"],
+    defaults: ["warn", "Back on defaults"], rejected: ["bad", "Rejected"], none: ["idle", "Firmware defaults"], pending: ["warn", "Pending"],
+  };
+  const [cls, text] = sw !== "idle" ? states[sw] : (states[res] || ["idle", res]);
+  pill.className = "pill " + cls; pill.textContent = text;
+  if (!modemFormInit) { modemFormInit = true; setForm(cur); }
+  renderModemCalc();
+}
+
+function wireModem() {
+  const fill = (id, items) => { document.getElementById(id).innerHTML = items.map(([v, t]) => `<option value="${v}">${t}</option>`).join(""); };
+  fill("m-sf", [5, 6, 7, 8, 9, 10, 11, 12].map(s => [s, "SF" + s]));
+  fill("m-bw", [200, 400, 800, 1600].map(b => [b, b]));
+  fill("m-cr", [5, 6, 7, 8].map(c => [c, "4/" + c]));
+  setForm({ sf: 7, bw: 800, cr: 5, mp: 128, sp: 128 });
+  const applySplit = () => {
+    const split = document.getElementById("m-split").value;
+    if (split === "custom") return;
+    const c = formCfg(), r = splitFrames(c.sf, c.bw, c.cr, split);
+    if (r) { document.getElementById("m-mp").value = r.mp; document.getElementById("m-sp").value = r.sp; }
+  };
+  for (const id of ["m-sf", "m-bw", "m-cr", "m-split"]) document.getElementById(id).addEventListener("input", applySplit);
+  for (const id of ["m-mp", "m-sp"]) document.getElementById(id).addEventListener("input", () => { document.getElementById("m-split").value = "custom"; });
+  for (const id of ["m-sf", "m-bw", "m-cr", "m-split", "m-mp", "m-sp", "b-dist", "b-extra", "b-need", "b-ref", "b-noise"]) {
+    document.getElementById(id).addEventListener("input", renderModemCalc);
+  }
+  document.getElementById("b-table").addEventListener("click", e => {
+    const b = e.target.closest("button[data-use]");
+    if (b) { const u = JSON.parse(b.dataset.use); document.getElementById("m-split").value = u.split || "custom"; setForm(u); }
+  });
+  document.getElementById("m-current").addEventListener("click", () => { const m = masterBoard(); if (m) setForm(currentCfg(m.st)); });
+  document.getElementById("m-apply").addEventListener("click", () => {
+    const m = masterBoard(), c = formCfg();
+    if (m) command(m, `modem ${c.sf} ${c.bw} ${c.cr} ${c.mp} ${c.sp}`);
+  });
+}
+
+// ---- Throughput tests ----
+function drawSeries(svgId, values, color) {
+  const svg = document.getElementById(svgId), v = values.slice(-120);
+  if (v.length < 2) { svg.innerHTML = ""; return; }
+  const hi = Math.max(...v, 0.001);
+  const d = v.map((x, i) => (i ? "L" : "M") + (300 * i / 119).toFixed(1) + " " + (60 - 56 * x / hi).toFixed(1)).join(" ");
+  svg.innerHTML = `<path d="${d}" fill="none" stroke="${color}" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
+}
+const kb = v => `${v.toFixed(2)}<small>kbit/s</small>`;
+const gen = { running: false, start: 0, until: 0, first: null, prev: null, history: [] };
+
+function updateGen() {
+  const m = masterBoard(), st = m && m.st;
+  if (!st || !("gen.rx_bytes" in st)) { document.getElementById("g-start").disabled = true; return; }
+  document.getElementById("g-start").disabled = gen.running || !st.connected;
+  const pill = document.getElementById("g-state");
+  if (!gen.running && st["gen.active"] === 1) { pill.className = "pill warn"; pill.textContent = "On (started elsewhere)"; }
+  if (!gen.running) return;
+  const t = m.prev.t;
+  if (gen.prev && st["gen.rx_bytes"] >= gen.prev.st["gen.rx_bytes"]) {
+    const dt = t - gen.prev.t, kbps = dt > 0 ? (st["gen.rx_bytes"] - gen.prev.st["gen.rx_bytes"]) * 8 / dt / 1000 : 0;
+    gen.history.push(kbps);
+    const total = (st["gen.rx_bytes"] - gen.first.st["gen.rx_bytes"]) * 8 / Math.max(0.001, t - gen.first.t) / 1000;
+    const cap = st["modem.sp"] && st.frame_us ? (st["modem.sp"] - 9) * 8e6 / st.frame_us / 1000 : null;
+    const segs = st["gen.rx_segments"] - gen.first.st["gen.rx_segments"], lost = st["gen.lost"] - gen.first.st["gen.lost"];
+    document.getElementById("g-now").innerHTML = kb(kbps);
+    document.getElementById("g-avg").innerHTML = kb(total);
+    document.getElementById("g-pct").innerHTML = cap ? `${(100 * total / cap).toFixed(0)}<small>% of ${cap.toFixed(1)}</small>` : "–";
+    document.getElementById("g-lost").innerHTML = `${lost}<small>of ${segs + lost}</small>`;
+    drawSeries("g-spark", gen.history, "var(--spark)");
+  }
+  gen.prev = { st, t };
+  pill.className = "pill " + (st.connected ? "good" : "bad");
+  pill.textContent = st.connected ? `Running ${Math.round(t - gen.start)} s` : "Link down";
+  if (gen.until && t >= gen.until) stopGen();
+}
+async function startGen() {
+  const m = masterBoard();
+  if (!m || !(await command(m, "gen on"))) return;
+  const dur = num("g-dur");
+  Object.assign(gen, { running: true, start: Date.now() / 1000, until: dur > 0 ? Date.now() / 1000 + dur : 0,
+                       first: { st: m.st, t: m.prev.t }, prev: null, history: [] });
+  for (const id of ["g-now", "g-avg", "g-pct", "g-lost"]) document.getElementById(id).textContent = "–";
+}
+async function stopGen() {
+  gen.running = false;
+  const m = masterBoard();
+  if (m) await command(m, "gen off");
+  const pill = document.getElementById("g-state");
+  pill.className = "pill idle"; pill.textContent = "Finished";
+}
+
+async function pollEcho() {
+  let e;
+  try { e = await (await fetch("/api/echo")).json(); } catch { return; }
+  const pill = document.getElementById("e-state");
+  document.getElementById("e-start").disabled = !!e.running || !masterBoard();
+  if (e.error) { pill.className = "pill bad"; pill.textContent = "Error"; document.getElementById("e-note").textContent = e.error; return; }
+  if (!("sent" in e)) return;
+  pill.className = "pill " + (e.running ? "good" : "idle");
+  pill.textContent = e.running ? `Running ${Math.round(e.elapsed || 0)} s` : "Finished";
+  document.getElementById("e-now").innerHTML = e.running ? kb(e.kbps) : "–";
+  const avg = e.avg_kbps ?? (e.elapsed ? e.bytes_back * 8 / 1000 / e.elapsed : 0);
+  document.getElementById("e-avg").innerHTML = kb(avg);
+  document.getElementById("e-cnt").innerHTML = `${e.back}<small>/ ${e.sent}${e.late ? `, ${e.late} late` : ""}${e.lost ? `, ${e.lost} lost` : ""}${e.corrupted ? `, ${e.corrupted} bad` : ""}</small>`;
+  if (e.timeout_s && !document.getElementById("e-note").dataset.sizeNote) {
+    document.getElementById("e-note").textContent = `Counted as lost after ${e.timeout_s.toFixed(1)} s (from the current frame sizes and hop time).`;
+  }
+  document.getElementById("e-rtt").innerHTML = e.rtt_median != null ? `${e.rtt_median.toFixed(0)}<small>ms, p95 ${e.rtt_p95.toFixed(0)}</small>` : "–";
+  drawSeries("e-spark", e.history || [], "var(--spark-2)");
+}
+async function startEcho() {
+  const m = masterBoard();
+  if (!m) return;
+  const maxDg = m.st["udp.max_dgram"] || 1472;
+  const size = Math.min(Math.round(num("e-size")), maxDg);
+  const note = document.getElementById("e-note");
+  note.textContent = size < num("e-size") ? `Datagram size limited to ${maxDg} B by the current frame size.` : "";
+  note.dataset.sizeNote = size < num("e-size") ? "1" : "";
+  const r = await (await fetch("/api/echo/start", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ host: m.host, size, window: Math.round(num("e-win")), duration: num("e-dur") }) })).json();
+  log(`echo test: ${r.reply ?? r.error}`, !r.ok);
+}
+
+function wireTests() {
+  document.getElementById("g-start").addEventListener("click", startGen);
+  document.getElementById("g-stop").addEventListener("click", stopGen);
+  document.getElementById("e-start").addEventListener("click", startEcho);
+  document.getElementById("e-stop").addEventListener("click", async () => { await fetch("/api/echo/stop", { method: "POST", body: "{}" }); });
+}
+
+// ---- Logging ----
+async function pollLog() {
+  let l;
+  try { l = await (await fetch("/api/log")).json(); } catch { return; }
+  const pill = document.getElementById("log-state");
+  pill.className = "pill " + (l.active ? "good" : "idle");
+  pill.textContent = l.active ? `Logging · ${l.rows} rows` : "Not logging";
+  document.getElementById("log-file").textContent = l.file ? (l.active ? "" : "last: ") + l.file : "";
+  document.getElementById("log-toggle").textContent = l.active ? "Stop logging" : "Start logging";
+  document.getElementById("log-toggle").dataset.active = l.active ? "1" : "";
+}
+async function logPost(path, body) {
+  const r = await (await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) })).json();
+  log(r.reply ?? r.error, !r.ok);
+  pollLog();
+}
+function wireLog() {
+  document.getElementById("log-toggle").addEventListener("click", e =>
+    logPost(e.target.dataset.active ? "/api/log/stop" : "/api/log/start", { name: "" }));
+  const add = () => {
+    const input = document.getElementById("log-note");
+    if (!input.value.trim()) return;
+    logPost("/api/log/note", { text: input.value });
+    input.value = "";
+  };
+  document.getElementById("log-add").addEventListener("click", add);
+  document.getElementById("log-note").addEventListener("keydown", e => { if (e.key === "Enter") add(); });
+}
+
+// ---- Channel quality ----
+let chanBase = null, chanLast = null;
+async function pollChan() {
+  const m = masterBoard();
+  if (!m) return;
+  let c;
+  try { c = await (await fetch(`/api/chan?host=${encodeURIComponent(m.host)}`)).json(); } catch { return; }
+  if (!c.tx) { document.getElementById("chan-info").textContent = c.error || "no channel data"; return; }
+  chanLast = c;
+  if (!chanBase) chanBase = c;
+  drawChan();
+}
+function drawChan() {
+  const c = chanLast, b = chanBase, svg = document.getElementById("chan-svg");
+  if (!c) return;
+  const n = c.tx.length, W = 900, H = 220, L = 40, R = 10, T = 12, B = 34;
+  const fx = mhz => L + (W - L - R) * (mhz - 2400) / 82;
+  const y = pct => T + (H - T - B) * (1 - pct / 100);
+  let h = "";
+  for (const [ch, f] of [[1, 2412], [6, 2437], [11, 2462]]) {
+    h += `<rect x="${fx(f - 11)}" y="${T}" width="${fx(f + 11) - fx(f - 11)}" height="${H - T - B}" fill="var(--warn)" opacity=".10"/>`;
+    h += `<text x="${fx(f)}" y="${T + 10}" text-anchor="middle">WiFi ${ch}</text>`;
+  }
+  for (const p of [0, 50, 100]) {
+    h += `<line x1="${L}" x2="${W - R}" y1="${y(p)}" y2="${y(p)}" stroke="var(--rule)"/><text x="${L - 6}" y="${y(p) + 3}" text-anchor="end">${p}%</text>`;
+  }
+  let totTx = 0, totRx = 0;
+  for (let i = 0; i < n; i++) {
+    const tx = c.tx[i] - b.tx[i], rx = c.rx[i] - b.rx[i], busy = c.busy[i] - b.busy[i];
+    totTx += tx; totRx += rx;
+    const mhz = (c.base_khz + i * c.step_khz) / 1000, x = fx(mhz), w = 13;
+    if (tx > 0) {
+      const pct = Math.min(100, 100 * rx / tx);
+      const color = pct >= 95 ? "var(--good)" : pct >= 80 ? "var(--warn)" : "var(--bad)";
+      h += `<rect x="${x - w / 2}" y="${y(pct)}" width="${w}" height="${y(0) - y(pct)}" rx="2" fill="${color}"><title>${mhz} MHz: ${rx}/${tx} replies (${pct.toFixed(0)} %), ${busy} LBT skips</title></rect>`;
+    }
+    if (busy > 0) h += `<rect x="${x - w / 2}" y="${y(0) + 3}" width="${w}" height="4" fill="var(--bad)"><title>${busy} LBT skips</title></rect>`;
+    if (i % 5 === 0) h += `<text x="${x}" y="${H - 8}" text-anchor="middle">${mhz.toFixed(0)}</text>`;
+  }
+  svg.innerHTML = h;
+  document.getElementById("chan-info").textContent =
+    `master: ${totRx} of ${totTx} frames got a reply (${totTx ? (100 * totRx / totTx).toFixed(1) : "–"} %) since ${chanBase === chanLast ? "now" : "reset"}`;
+}
+
+async function init() {
+  wireModem();
+  wireLog();
+  document.getElementById("chan-reset").addEventListener("click", () => { chanBase = chanLast; drawChan(); });
+  wireTests();
+  const { hosts } = await (await fetch("/api/hosts")).json();
+  const tpl = document.getElementById("card-tpl");
+  for (const host of hosts) {
+    const el = tpl.content.firstElementChild.cloneNode(true);
+    $(el, "ip").textContent = host;
+    document.getElementById("boards").append(el);
+    const board = { host, el, name: host, prev: null, history: [], pwrDirty: false };
+    boards[host] = board;
+    wire(board);
+  }
+  let ticks = 0;
+  const tick = () => { Object.values(boards).forEach(poll); pollEcho(); pollLog(); if (ticks++ % 5 === 0) pollChan(); };
+  tick();
+  setInterval(tick, 1000);
+}
+init();
+</script>
+</body>
+</html>
